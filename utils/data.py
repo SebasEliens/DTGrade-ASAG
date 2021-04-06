@@ -1,6 +1,8 @@
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 import xml.etree.ElementTree as ElementTree
+from sklearn.model_selection import train_test_split
+from collections import defaultdict
 from typing import NamedTuple
 from types import SimpleNamespace
 from transformers import AutoTokenizer
@@ -59,12 +61,13 @@ class DTGradeDataset(Dataset):
         'correct(0)|correct_but_incomplete(0)|contradictory(0)|incorrect(1)': 3
         }
 
-    def __init__(self, df, meta,  model_path = 'distilbert-base-uncased', train_percent = 100):
+    def __init__(self, df, meta, model_path = 'distilbert-base-uncased', train_percent = 100):
         self.data = df
         self.meta = meta
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, lowercase = True)
         self.encode()
         self._data = self.data.copy()
+        self._train, self._test = train_test_split(self._data, test_size=0.2, random_state=42)
 
     def __len__(self):
         return len(self.data)
@@ -84,13 +87,22 @@ class DTGradeDataset(Dataset):
             EncodedText[i] = torch.Tensor(tokens).long()
         self.data['EncodedText'] = EncodedText
 
+    def train(self):
+        self.data = self._train
+
+    def test(self):
+        self.data = self._test
+
+    def reset(self):
+        self.data = self._data
+
+
     @staticmethod
     def from_xml(path, **kwargs):
         tree = ElementTree.parse(path)
         root = tree.getroot()
         records = []
-        meta_index = []
-        meta_records = []
+        meta = defaultdict(dict)
         for instance in root:
             # There are 4 non-correct labels in the dataset. I throw these instances out.
             try:
@@ -99,12 +111,9 @@ class DTGradeDataset(Dataset):
                 # print('Thrown out instance', instance.attrib['ID'], 'with label:')
                 # print(instance[4].attrib['Label'])
                 continue
-            meta_index += [instance.ID]
-            meta_records += [instance.MetaInfo]
             records += instance.explode()
+            meta[instance.ID] = instance.MetaInfo
         df = pd.DataFrame.from_records(records)
-        meta = pd.DataFrame.from_records(meta_records, index = meta_index)
-        meta.index.name = 'ID'
         return DTGradeDataset(df, meta, **kwargs)
 
     @staticmethod

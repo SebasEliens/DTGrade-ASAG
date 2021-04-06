@@ -13,7 +13,10 @@ from typing import NamedTuple
 from types import SimpleNamespace
 from transformers import AutoTokenizer
 from tqdm import tqdm
-from utils.configuration import __datafile__, __default_model_path__
+try:
+    from utils.configuration import __datafile__, __default_model_path__
+except ModuleNotFoundError:
+    from configuration import __datafile__, __default_model_path__
 import torch
 import re
 
@@ -74,7 +77,8 @@ class DTGradeDataset(Dataset):
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, lowercase = True)
         self.encode()
         self._data = self.data.copy()
-        self._train, self._test = train_test_split(self._data, test_size=0.2, random_state=42)
+        self._trainIDs, self._testIDs = train_test_split(self._data['ID'].unique(), test_size=0.2, random_state=42)
+        #self._train, self._test = train_test_split(self._data, test_size=0.2, random_state=42)
 
     def __len__(self):
         return len(self.data)
@@ -100,11 +104,11 @@ class DTGradeDataset(Dataset):
             self.data = self.data.iloc[:num_rows]
 
     def train(self):
-        self.data = self._train
+        self.data = self._data[self._data['ID'].isin(self._trainIDs)]
         self.take_percentage()
 
     def test(self):
-        self.data = self._test
+        self.data = self._data[self._data['ID'].isin(self._testIDs)]
         self.take_percentage()
 
     def reset(self):

@@ -57,17 +57,12 @@ def train():
                 patience +=1
                 if patience >= config.max_patience:
                     break
-        # Move stuff off the gpu
         model.cpu()
-        #This is for sure a kinda dumb way of doing it, but the least mentally taxing right now
         optimizer = torch.optim.AdamW(model.parameters(), lr = config.max_lr)
         gc.collect()
         torch.cuda.empty_cache()
-        #return model   #Gives Error
 
     except KeyboardInterrupt:
-        if config.log:
-            wandb.save('*.pt')
         model.cpu()
         optimizer = torch.optim.AdamW(model.parameters(), lr = config.max_lr)
         gc.collect()

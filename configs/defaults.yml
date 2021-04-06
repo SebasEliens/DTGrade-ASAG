@@ -1,0 +1,6 @@
+data:
+  directory: data
+  filename: grade_data.xml
+
+training:
+  model_path: 'distilbert-base-uncased'

@@ -1,5 +1,11 @@
 import pandas as pd
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import (
+    Dataset,
+    DataLoader,
+    SequentialSampler,
+    RandomSampler,
+    BatchSampler,
+    DataLoader)
 import xml.etree.ElementTree as ElementTree
 from sklearn.model_selection import train_test_split
 from collections import defaultdict
@@ -7,8 +13,8 @@ from typing import NamedTuple
 from types import SimpleNamespace
 from transformers import AutoTokenizer
 from tqdm import tqdm
+from configuration import __datafile__, __default_model_path__
 import torch
-import json
 import re
 
 class DTGradeInstance(NamedTuple):
@@ -61,7 +67,7 @@ class DTGradeDataset(Dataset):
         'correct(0)|correct_but_incomplete(0)|contradictory(0)|incorrect(1)': 3
         }
 
-    def __init__(self, df, meta, model_path = 'distilbert-base-uncased', train_percent = 100):
+    def __init__(self, df, meta, model_path = __default_model_path__, train_percent = 100):
         self.data = df
         self.meta = meta
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, lowercase = True)
@@ -161,3 +167,39 @@ def pad_tensor_batch(tensors, pad_token = 0):
     for i, tensor in enumerate(tensors):
         batch[i, :tensor.size(0)] = tensor
     return batch
+
+
+def get_train_dataloader(datafile = __datafile__,
+                         model_path = __default_model_path__,
+                         num_workers = 4 if torch.cuda.is_available() else 0,
+                         train_percent = 100,
+                         batch_size = 1,
+                         drop_last = False):
+    dataset = DTGradeDataset.from_xml(datafile,
+                                      model_path=model_path,
+                                      train_percent=train_percent
+                                      )
+    dataset.train()
+    print(f"Training set loaded with {len(dataset.data)} lines of data.")
+    sampler = RandomSampler(dataset)
+    batch_sampler =BatchSampler(sampler, batch_size = batch_size, drop_last=drop_last)
+    loader = DataLoader(dataset, batch_sampler=batch_sampler, collate_fn=dataset.collater, num_workers = num_workers)
+    return loader
+
+
+def get_test_dataloader(datafile = __datafile__,
+                         model_path = __default_model_path__,
+                         num_workers = 4 if torch.cuda.is_available() else 0,
+                         train_percent = 100,
+                         batch_size = 1,
+                         drop_last = False):
+    dataset = DTGradeDataset.from_xml(datafile,
+                                      model_path=model_path,
+                                      train_percent=train_percent
+                                      )
+    dataset.test()
+    print(f"Test set loaded with {len(dataset.data)} lines of data.")
+    sampler = SequentialSampler(dataset)
+    batch_sampler = BatchSampler(sampler, batch_size = batch_size, drop_last=drop_last)
+    loader = DataLoader(dataset, batch_sampler=batch_sampler, collate_fn=dataset.collater, num_workers = num_workers)
+    return loader

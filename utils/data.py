@@ -2,6 +2,7 @@ import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 import xml.etree.ElementTree as ElementTree
 from typing import NamedTuple
+from types import SimpleNamespace
 from transformers import AutoTokenizer
 from tqdm import tqdm
 import torch
@@ -45,7 +46,7 @@ class DTGradeInstance(NamedTuple):
                  'Label': self.Label,
                  'ProblemDescription': self.ProblemDescription,
                  'Question': self.Question,
-g                 'Answer': self.Answer,
+                 'Answer': self.Answer,
                  'ReferenceAnswer': ref_answer} for ref_answer in self.ReferenceAnswers]
 
 
@@ -79,7 +80,8 @@ class DTGradeDataset(Dataset):
             question_tokens = self.tokenizer.encode(row['Question'])
             reference_tokens =  self.tokenizer.encode(row['ReferenceAnswer'])
             answer_tokens = self.tokenizer.encode(row['Answer'])
-            EncodedText[i]= problem_tokens + question_tokens[1:] + reference_tokens[1:] + answer_tokens[1:]
+            tokens = problem_tokens + question_tokens[1:] + reference_tokens[1:] + answer_tokens[1:]
+            EncodedText[i] = torch.Tensor(tokens).long()
         self.data['EncodedText'] = EncodedText
 
     @staticmethod
@@ -104,3 +106,49 @@ class DTGradeDataset(Dataset):
         meta = pd.DataFrame.from_records(meta_records, index = meta_index)
         meta.index.name = 'ID'
         return DTGradeDataset(df, meta, **kwargs)
+
+    @staticmethod
+    def collater(batch):
+        input_ids = [b.EncodedText for b in batch]
+        labels = [b.Label for b in batch]
+        data = {'input':pad_tensor_batch(input_ids),
+                'labels': torch.Tensor(labels).long()}
+        return Batch(**data)
+
+
+class Batch(SimpleNamespace):
+    def __init__(self, **kwargs):
+        super(Batch, self).__init__(**kwargs)
+
+    def cuda(self):
+        atts = self.__dict__
+        for att, val in atts.items():
+            try:
+                self.__dict__[att] = val.cuda()
+            except AttributeError:
+                pass
+
+    def cpu(self):
+        atts = self.__dict__
+        for att, val in atts.items():
+            try:
+                self.__dict__[att] = val.cpu()
+            except AttributeError:
+                pass
+
+    def __contains__(self, item):
+        return item in self.__dict__
+
+    def generate_mask(self):
+        assert "input" in self
+        return torch.where(self.input.eq(0), self.input, torch.ones_like(self.input))
+
+
+def pad_tensor_batch(tensors, pad_token = 0):
+    max_length = max([t.size(0) for t in tensors])
+    batch = torch.zeros((len(tensors), max_length)).long()
+    if pad_token > 0:
+        batch.fill_(pad_token)
+    for i, tensor in enumerate(tensors):
+        batch[i, :tensor.size(0)] = tensor
+    return batch

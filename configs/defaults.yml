@@ -4,3 +4,12 @@ data:
 
 training:
   model_path: 'distilbert-base-uncased'
+  batch_size: 8
+  num_workers: 4
+  train_percent: 3
+  test_percent: 20
+  max_lr: 1.e-5
+  weight_decay: 1.e-5
+  max_epochs: 15
+  max_patience: 3
+  num_labels: 4

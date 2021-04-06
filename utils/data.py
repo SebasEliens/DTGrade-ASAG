@@ -13,7 +13,7 @@ from typing import NamedTuple
 from types import SimpleNamespace
 from transformers import AutoTokenizer
 from tqdm import tqdm
-from configuration import __datafile__, __default_model_path__
+from utils.configuration import __datafile__, __default_model_path__
 import torch
 import re
 
@@ -24,7 +24,7 @@ class DTGradeInstance(NamedTuple):
     ProblemDescription: str
     Question: str
     Answer: str
-    ReferenceAnswers: list[str]
+    ReferenceAnswers: list
     MetaInfo: dict
 
     @staticmethod
@@ -67,9 +67,10 @@ class DTGradeDataset(Dataset):
         'correct(0)|correct_but_incomplete(0)|contradictory(0)|incorrect(1)': 3
         }
 
-    def __init__(self, df, meta, model_path = __default_model_path__, train_percent = 100):
+    def __init__(self, df, meta, model_path = __default_model_path__, percent = 100):
         self.data = df
         self.meta = meta
+        self.percent = percent
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, lowercase = True)
         self.encode()
         self._data = self.data.copy()
@@ -91,13 +92,20 @@ class DTGradeDataset(Dataset):
             answer_tokens = self.tokenizer.encode(row['Answer'])
             tokens = problem_tokens + question_tokens[1:] + reference_tokens[1:] + answer_tokens[1:]
             EncodedText[i] = torch.Tensor(tokens).long()
-        self.data['EncodedText'] = EncodedText
+        self.data['input_ids'] = EncodedText
+
+    def take_percentage(self):
+        if self.percent < 100:
+            num_rows = int(self.percent*0.01*len(self.data))
+            self.data = self.data.iloc[:num_rows]
 
     def train(self):
         self.data = self._train
+        self.take_percentage()
 
     def test(self):
         self.data = self._test
+        self.take_percentage()
 
     def reset(self):
         self.data = self._data
@@ -124,9 +132,9 @@ class DTGradeDataset(Dataset):
 
     @staticmethod
     def collater(batch):
-        input_ids = [b.EncodedText for b in batch]
+        input_ids = [b.input_ids for b in batch]
         labels = [b.Label for b in batch]
-        data = {'input':pad_tensor_batch(input_ids),
+        data = {'input_ids':pad_tensor_batch(input_ids),
                 'labels': torch.Tensor(labels).long()}
         return Batch(**data)
 
@@ -156,7 +164,7 @@ class Batch(SimpleNamespace):
 
     def generate_mask(self):
         assert "input" in self
-        return torch.where(self.input.eq(0), self.input, torch.ones_like(self.input))
+        return torch.where(self.input_ids.eq(0), self.input_ids, torch.ones_like(self.input_ids))
 
 
 def pad_tensor_batch(tensors, pad_token = 0):
@@ -172,12 +180,12 @@ def pad_tensor_batch(tensors, pad_token = 0):
 def get_train_dataloader(datafile = __datafile__,
                          model_path = __default_model_path__,
                          num_workers = 4 if torch.cuda.is_available() else 0,
-                         train_percent = 100,
+                         percent = 100,
                          batch_size = 1,
                          drop_last = False):
     dataset = DTGradeDataset.from_xml(datafile,
                                       model_path=model_path,
-                                      train_percent=train_percent
+                                      percent=percent
                                       )
     dataset.train()
     print(f"Training set loaded with {len(dataset.data)} lines of data.")
@@ -190,12 +198,12 @@ def get_train_dataloader(datafile = __datafile__,
 def get_test_dataloader(datafile = __datafile__,
                          model_path = __default_model_path__,
                          num_workers = 4 if torch.cuda.is_available() else 0,
-                         train_percent = 100,
+                         percent = 100,
                          batch_size = 1,
                          drop_last = False):
     dataset = DTGradeDataset.from_xml(datafile,
                                       model_path=model_path,
-                                      train_percent=train_percent
+                                      percent=percent
                                       )
     dataset.test()
     print(f"Test set loaded with {len(dataset.data)} lines of data.")

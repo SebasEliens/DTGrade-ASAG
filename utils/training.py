@@ -13,7 +13,7 @@ def train_epoch(loader, model, optimizer, lr_scheduler, num_labels, cuda, log = 
             if cuda:
                 batch.cuda()
             optimizer.zero_grad()
-            logits = model(input_ids = batch.input_ids).logits
+            logits = model(input_ids = batch.input_ids, attention_mask = batch.generate_mask()).logits
             loss = loss_fn(logits.view(-1, num_labels), batch.labels.view(-1))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 10.)
@@ -51,7 +51,7 @@ def validate(model, loader, cuda,  token_types = False):
         for i,batch in enumerate(loader):
             if cuda:
                 batch.cuda()
-            logits = model(input_ids =  batch.input_ids).logits
+            logits = model(input_ids =  batch.input_ids, attention_mask = batch.generate_mask()).logits
             preds.append(logits.argmax(-1).squeeze().cpu())
             true_labels.append(batch.labels.cpu())
             pbar.update(1)

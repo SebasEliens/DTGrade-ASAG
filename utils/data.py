@@ -167,8 +167,9 @@ class Batch(SimpleNamespace):
         return item in self.__dict__
 
     def generate_mask(self):
-        assert "input" in self
+        assert "input_ids" in self
         return torch.where(self.input_ids.eq(0), self.input_ids, torch.ones_like(self.input_ids))
+
 
 
 def pad_tensor_batch(tensors, pad_token = 0):

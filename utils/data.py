@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from torch.utils.data import (
     Dataset,
     DataLoader,
@@ -36,7 +37,10 @@ class DTGradeInstance(NamedTuple):
         for child in instance:
             if child.tag == 'Annotation':
                 LabelString = child.attrib['Label']
-                Label = DTGradeDataset.label_to_class[LabelString]
+                try:
+                    Label = int(DTGradeDataset.label_to_class[LabelString])
+                except KeyError:
+                    Label = -99
             if child.tag == 'ProblemDescription':
                 ProblemDescription = child.text
             if child.tag == 'Question':
@@ -51,6 +55,18 @@ class DTGradeInstance(NamedTuple):
                 MetaInfo = child.attrib
         return DTGradeInstance(int(ID), Label, LabelString,  ProblemDescription, Question, Answer, ReferenceAnswers, MetaInfo)
 
+    @staticmethod
+    def from_df(df):
+        ID = df['ID'].unique().item()
+        Label = df['Label'].unique().item()
+        ProblemDescription = df['ProblemDescription'].unique().item()
+        Question = df['Question'].unique().item()
+        Answer = df['Answer'].unique().item()
+        ReferenceAnswers = df['ReferenceAnswer']
+        MetaInfo = {}
+        LabelString = ''
+        return DTGradeInstance(int(ID), Label, LabelString,  ProblemDescription, Question, Answer, ReferenceAnswers, MetaInfo)
+
 
     def explode(self):
         return [{'ID': self.ID,
@@ -60,6 +76,8 @@ class DTGradeInstance(NamedTuple):
                  'Answer': self.Answer,
                  'ReferenceAnswer': ref_answer} for ref_answer in self.ReferenceAnswers]
 
+    def to_df(self):
+        return pd.DataFrame.from_records(self.explode())
 
 class DTGradeDataset(Dataset):
     label_to_class = {
@@ -70,15 +88,19 @@ class DTGradeDataset(Dataset):
         'correct(0)|correct_but_incomplete(0)|contradictory(0)|incorrect(1)': 3
         }
 
-    def __init__(self, df, meta, model_path = __default_model_path__, percent = 100):
-        self.data = df
-        self.meta = meta
+    def __init__(self, instances, drop_dirty = True, train_test_IDs = None,  model_path = __default_model_path__, percent = 100):
+        self.num_labels = 4
+        self.instances = instances
+        self.data = self.get_df(drop_dirty=drop_dirty)
         self.percent = percent
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, lowercase = True)
         self.encode()
         self._data = self.data.copy()
-        self._trainIDs, self._testIDs = train_test_split(self._data['ID'].unique(), test_size=0.2, random_state=42)
-        #self._train, self._test = train_test_split(self._data, test_size=0.2, random_state=42)
+        self.instanceIDs = np.array([instance.ID for instance in instances])
+        if train_test_IDs is None:
+            self._trainIDs, self._testIDs = train_test_split(self._data['ID'].unique(), test_size=0.2, random_state=42)
+        else:
+            self._trainIDs, self._testIDs = train_test_IDs
 
     def __len__(self):
         return len(self.data)
@@ -114,25 +136,34 @@ class DTGradeDataset(Dataset):
     def reset(self):
         self.data = self._data
 
+    def get_df(self, drop_dirty = True, ID = None):
+        records = []
+        for instance in self.instances:
+            records += instance.explode()
+        df = pd.DataFrame.from_records(records)
+        if drop_dirty:
+            df = df[df['Label'] != -99]
+        if ID is not None:
+            df = df[df['ID']==ID]
+        return df
+
+    def get_instance_by_ID(self, ID):
+        idx = self.instanceIDs.tolist().index(ID)
+        return self.instances[idx]
+
+    def get_train_instances(self):
+        return [instance for instance, ID in zip(self.instances, self.instanceIDs) if ID in self._trainIDs]
+
+    def get_test_instances(self):
+        return [instance for instance, ID in zip(self.instances, self.instanceIDs) if ID in self._testIDs]
+
 
     @staticmethod
     def from_xml(path, **kwargs):
         tree = ElementTree.parse(path)
         root = tree.getroot()
-        records = []
-        meta = defaultdict(dict)
-        for instance in root:
-            # There are 4 non-correct labels in the dataset. I throw these instances out.
-            try:
-                instance = DTGradeInstance.from_xml(instance)
-            except KeyError:
-                # print('Thrown out instance', instance.attrib['ID'], 'with label:')
-                # print(instance[4].attrib['Label'])
-                continue
-            records += instance.explode()
-            meta[instance.ID] = instance.MetaInfo
-        df = pd.DataFrame.from_records(records)
-        return DTGradeDataset(df, meta, **kwargs)
+        instances = [DTGradeInstance.from_xml(instance) for instance in root]
+        return DTGradeDataset(instances, **kwargs)
 
     @staticmethod
     def collater(batch):
@@ -195,7 +226,7 @@ def get_train_dataloader(datafile = __datafile__,
     dataset.train()
     print(f"Training set loaded with {len(dataset.data)} lines of data.")
     sampler = RandomSampler(dataset)
-    batch_sampler =BatchSampler(sampler, batch_size = batch_size, drop_last=drop_last)
+    batch_sampler = BatchSampler(sampler, batch_size = batch_size, drop_last=drop_last)
     loader = DataLoader(dataset, batch_sampler=batch_sampler, collate_fn=dataset.collater, num_workers = num_workers)
     return loader
 

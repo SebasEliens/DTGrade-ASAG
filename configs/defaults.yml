@@ -13,3 +13,6 @@ training:
   max_epochs: 15
   max_patience: 3
   num_labels: 4
+
+eval:
+  modeldir: cpu_trained_distilbert_split_after

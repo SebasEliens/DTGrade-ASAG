@@ -2,12 +2,8 @@ import pandas as pd
 import json
 from torch.nn.functional import softmax
 from tqdm import tqdm
-try:
-    from utils.data import DTGradeDataset
-    from utils.training import metrics
-except ModuleNotFoundError:
-    from data import DTGradeDataset
-    from training import metrics
+from .data import DTGradeDataset
+from .training import metrics
 
 class Predictor:
     def __init__(self, model, dataset):
@@ -19,23 +15,19 @@ class Predictor:
     def predict_data(self):
         predictions = []
         for ID in tqdm(self.dataset.data['ID'].unique(), desc = 'Compute predictions'):
-            df = self.dataset.data[self.dataset.data['ID'] == ID]
-            Label = df['Label'].unique().item()
-            batch = DTGradeDataset.collater([df.iloc[i] for i in range(len(df))])
-            logits = self.model(input_ids = batch.input_ids, attention_mask = batch.generate_mask()).logits
-            pred = softmax(logits, dim = -1).mean(0).argmax(-1).item()
+            ID, Label, pred = self.predict_instance_with_ID(ID)
             predictions.append({'ID': ID, 'Label': Label, 'Pred': pred})
         df = pd.DataFrame.from_records(predictions)
         self.predictions = df
         return df
 
-    def predictions_to_csv(self, path):
-        if not isinstance(self.predictions, pd.DataFrame):
+    def predictions_to_csv(self, path, force = False):
+        if not isinstance(self.predictions, pd.DataFrame) or force:
             self.predict_data()
         self.predictions.to_csv(path)
 
-    def compute_metrics(self):
-        if not isinstance(self.predictions, pd.DataFrame):
+    def compute_metrics(self, force = False):
+        if not isinstance(self.predictions, pd.DataFrame) or force:
             self.predict_data()
         y_true = self.predictions['Label']
         pred = self.predictions['Pred']
@@ -47,8 +39,18 @@ class Predictor:
         self.metrics = mtr
         return mtr
 
-    def metrics_to_json(self, path):
-        if not self.metrics:
+    def metrics_to_json(self, path, force = False):
+        if not self.metrics or force:
             self.compute_metrics()
         with open(path, 'w') as f:
             json.dump(self.metrics, f)
+
+    def predict_instance_with_ID(self, ID):
+        df = self.dataset._data[self.dataset._data['ID'] == ID]
+        if df.empty:
+            raise Exception('Not a valid instance ID')
+        Label = df['Label'].unique().item()
+        batch = DTGradeDataset.collater([df.iloc[i] for i in range(len(df))])
+        logits = self.model(input_ids = batch.input_ids, attention_mask = batch.generate_mask()).logits
+        pred = softmax(logits, dim = -1).mean(0).argmax(-1).item()
+        return ID, Label, pred

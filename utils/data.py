@@ -1,3 +1,9 @@
+import re
+from types import SimpleNamespace
+from typing import NamedTuple
+from collections import defaultdict
+
+import torch
 import pandas as pd
 import numpy as np
 from torch.utils.data import (
@@ -9,17 +15,10 @@ from torch.utils.data import (
     DataLoader)
 import xml.etree.ElementTree as ElementTree
 from sklearn.model_selection import train_test_split
-from collections import defaultdict
-from typing import NamedTuple
-from types import SimpleNamespace
 from transformers import AutoTokenizer
 from tqdm import tqdm
-try:
-    from utils.configuration import __datafile__, __default_model_path__
-except ModuleNotFoundError:
-    from configuration import __datafile__, __default_model_path__
-import torch
-import re
+
+from .configuration import __datafile__, __default_model_path__
 
 class DTGradeInstance(NamedTuple):
     ID: int
@@ -30,6 +29,16 @@ class DTGradeInstance(NamedTuple):
     Answer: str
     ReferenceAnswers: list
     MetaInfo: dict
+
+    def __str__(self):
+        return  f"{'Instance ID':<11}: {self.ID}" +\
+                f"\n{'Label':<11}: {self.Label}" +\
+                f"\n{'LabelString':<10}: {self.LabelString}" +\
+                f"\n\n{'P':<2}: {self.ProblemDescription:>5}" +\
+                f"\n{'Q':<2}: {self.Question:>5}\n" +\
+                '\n'.join([f"\nR{i+1}: {r}" for i,r in enumerate(self.ReferenceAnswers)]) +\
+                f"\n\n{'A':<2}: {self.Answer}"
+
 
     @staticmethod
     def from_xml(instance):
@@ -88,17 +97,18 @@ class DTGradeDataset(Dataset):
         'correct(0)|correct_but_incomplete(0)|contradictory(0)|incorrect(1)': 3
         }
 
-    def __init__(self, instances, drop_dirty = True, train_test_IDs = None,  model_path = __default_model_path__, percent = 100):
+    def __init__(self, instances, train_test_IDs = None,  model_path = __default_model_path__, percent = 100):
         self.num_labels = 4
         self.instances = instances
-        self.data = self.get_df(drop_dirty=drop_dirty)
+        self.data = self.get_df()
         self.percent = percent
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, lowercase = True)
         self.encode()
         self._data = self.data.copy()
         self.instanceIDs = np.array([instance.ID for instance in instances])
+        self.clean_instance_IDs = np.array([instance.ID for instance in instances if instance.Label != -99])
         if train_test_IDs is None:
-            self._trainIDs, self._testIDs = train_test_split(self._data['ID'].unique(), test_size=0.2, random_state=42)
+            self._trainIDs, self._testIDs = train_test_split(self.clean_instance_IDs, test_size=0.2, random_state=42)
         else:
             self._trainIDs, self._testIDs = train_test_IDs
 
@@ -136,16 +146,17 @@ class DTGradeDataset(Dataset):
     def reset(self):
         self.data = self._data
 
-    def get_df(self, drop_dirty = True, ID = None):
+    def get_df(self, ID = None):
         records = []
         for instance in self.instances:
             records += instance.explode()
         df = pd.DataFrame.from_records(records)
-        if drop_dirty:
-            df = df[df['Label'] != -99]
         if ID is not None:
             df = df[df['ID']==ID]
         return df
+
+    def drop_dirty(self):
+        self.data = self.data[self.data['Label'] != -99]
 
     def get_instance_by_ID(self, ID):
         idx = self.instanceIDs.tolist().index(ID)

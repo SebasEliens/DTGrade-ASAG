@@ -1,6 +1,8 @@
-from utils.configuration import train_config
-from utils.data import get_train_dataloader, get_test_dataloader
-from utils.training import train_epoch, validate
+import sys
+sys.path.append('..')
+from DTgrade_model.utils.configuration import train_config
+from DTgrade_model.utils.data import get_train_dataloader, get_test_dataloader
+from DTgrade_model.utils.training import train_epoch, validate
 from fire import Fire
 import transformers
 import torch
